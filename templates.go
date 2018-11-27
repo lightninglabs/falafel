@@ -14,8 +14,14 @@ package {{.Package}}
 
 import (
 	"context"
+	"net"
+	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/golang/protobuf/proto"
+
 	"{{.TargetPkg}}"
 )
 `))
@@ -25,16 +31,46 @@ type serviceParams struct {
 	TargetName  string
 }
 
-var serviceTemplate = template.Must(template.New("servie").Parse(`
+var serviceTemplate = template.Must(template.New("service").Parse(`
+var (
+	buf{{.ServiceName}}Lis = bufconn.Listen(100)
+)
+
+func get{{.ServiceName}}Conn() (*grpc.ClientConn, func(), error) {
+	conn, err := buf{{.ServiceName}}Lis.Dial()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	clientConn, err := grpc.Dial("",
+		grpc.WithDialer(func(target string,
+			timeout time.Duration) (net.Conn, error) {
+			return conn, nil
+		}),
+		grpc.WithInsecure(),
+		grpc.WithBackoffMaxDelay(10*time.Second),
+	)
+	if err != nil {
+		conn.Close()
+		return nil, nil, err
+	}
+
+	close := func() {
+		conn.Close()
+	}
+
+	return clientConn, close, nil
+}
+
 // get{{.ServiceName}}Client returns a client connection to the server listening
 // on lis.
-func get{{.ServiceName}}Client() ({{.TargetName}}.{{.ServiceName}}Client, error) {
-	clientConn, err := getClientConn()
+func get{{.ServiceName}}Client() ({{.TargetName}}.{{.ServiceName}}Client, func(), error) {
+	clientConn, close, err := get{{.ServiceName}}Conn()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	client := {{.TargetName}}.New{{.ServiceName}}Client(clientConn)
-	return client, nil
+	return client, close, nil
 }
 `))
 
@@ -60,10 +96,11 @@ func {{.MethodName}}(msg []byte, callback Callback) {
 			req proto.Message) (proto.Message, error) {
 
 			// Get the gRPC client.
-			client, err := get{{.ServiceName}}Client()
+			client, close, err := get{{.ServiceName}}Client()
 			if err != nil {
 				return nil, err
 			}
+			defer close()
 
 			r := req.(*{{.RequestType}})
 			return client.{{.MethodName}}(ctx, r)
@@ -85,24 +122,25 @@ func {{.MethodName}}(msg []byte, callback Callback) {
 			return &{{.RequestType}}{}
 		},
 		recvStream: func(ctx context.Context,
-			req proto.Message) (*receiver, error) {
+			req proto.Message) (*receiver, func(), error) {
 
 			// Get the gRPC client.
-			client, err := get{{.ServiceName}}Client()
+			client, close, err := get{{.ServiceName}}Client()
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 
 			r := req.(*{{.RequestType}})
 			stream, err := client.{{.MethodName}}(ctx, r)
 			if err != nil {
-				return nil, err
+				close()
+				return nil, nil, err
 			}
 			return &receiver{
 				recv: func() (proto.Message, error) {
 					return stream.Recv()
 				},
-			}, nil
+			}, close, nil
 		},
 	}
 	s.start(msg, callback)
@@ -121,17 +159,18 @@ func {{.MethodName}}(callback Callback) (SendStream, error) {
 		newProto: func() proto.Message {
 			return &{{.RequestType}}{}
 		},
-		biStream: func(ctx context.Context) (*receiver, *sender, error) {
+		biStream: func(ctx context.Context) (*receiver, *sender, func(), error) {
 
 			// Get the gRPC client.
-			client, err := get{{.ServiceName}}Client()
+			client, close, err := get{{.ServiceName}}Client()
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 
 			stream, err := client.{{.MethodName}}(ctx)
 			if err != nil {
-				return nil, nil, err
+				close()
+				return nil, nil, nil, err
 			}
 			return &receiver{
 					recv: func() (proto.Message, error) {
@@ -144,7 +183,7 @@ func {{.MethodName}}(callback Callback) (SendStream, error) {
 						return stream.Send(r)
 					},
 					close: stream.CloseSend,
-				}, nil
+				}, close, nil
 		},
 	}
 	return b.start(callback)
@@ -161,16 +200,8 @@ package {{.Package}}
 
 import (
 	"context"
-	"net"
-	"time"
 
 	"github.com/golang/protobuf/proto"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/test/bufconn"
-)
-
-var (
-	lis = bufconn.Listen(100)
 )
 
 // Callback is an interface that is passed in by callers of the library, and
@@ -238,22 +269,6 @@ type sender struct {
 	close func() error
 }
 
-func getClientConn() (*grpc.ClientConn, error) {
-	conn, err := lis.Dial()
-	if err != nil {
-		return nil, err
-	}
-
-	return grpc.Dial("",
-		grpc.WithDialer(func(target string,
-			timeout time.Duration) (net.Conn, error) {
-			return conn, nil
-		}),
-		grpc.WithInsecure(),
-		grpc.WithBackoffMaxDelay(10*time.Second),
-	)
-}
-
 // syncHandler is a struct used to call the daemon's RPC interface on methods
 // where only one request and one response is expected.
 type syncHandler struct {
@@ -314,7 +329,7 @@ type readStreamHandler struct {
 
 	// recvStream calls the given client with the request and returns a
 	// receiver that reads the stream of responses.
-	recvStream func(context.Context, proto.Message) (*receiver, error)
+	recvStream func(context.Context, proto.Message) (*receiver, func(), error)
 }
 
 // start executes the RPC call specified by this readStreamHandler using the
@@ -341,11 +356,12 @@ func (s *readStreamHandler) start(msg []byte, callback Callback) {
 
 		// Call the desired method on the client using the decoded gRPC
 		// request, and get the receive stream back.
-		stream, err := s.recvStream(ctx, req)
+		stream, close, err := s.recvStream(ctx, req)
 		if err != nil {
 			callback.OnError(err)
 			return
 		}
+		defer close()
 
 		// We will read responses from the stream until we encounter an
 		// error.
@@ -379,7 +395,7 @@ type biStreamHandler struct {
 	// biStream calls the desired method on the given client and returns a
 	// receiver that reads the stream of responses, and a sender that can
 	// be used to send a stream of requests.
-	biStream func(context.Context) (*receiver, *sender, error)
+	biStream func(context.Context) (*receiver, *sender, func(), error)
 }
 
 // start executes the RPC call specified by this biStreamHandler, sending
@@ -388,7 +404,7 @@ func (b *biStreamHandler) start(callback Callback) (SendStream, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Start a bidirectional stream for the desired RPC method.
-	r, s, err := b.biStream(ctx)
+	r, s, close, err := b.biStream(ctx)
 	if err != nil {
 		cancel()
 		return nil, err
@@ -416,6 +432,7 @@ func (b *biStreamHandler) start(callback Callback) (SendStream, error) {
 	// responses.
 	go func() {
 		defer cancel()
+		defer close()
 
 		// We will read responses from the recv stream until we
 		// encounter an error.
