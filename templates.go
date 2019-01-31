@@ -85,8 +85,8 @@ var (
 	syncTemplate = template.Must(template.New("sync").Parse(`
 {{.Comment}}
 //
-// NOTE: This method produces a single result or error, and the callback
-// will be called only once.
+// NOTE: This method produces a single result or error, and the callback will
+// be called only once.
 func {{.MethodName}}(msg []byte, callback Callback) {
 	s := &syncHandler{
 		newProto: func() proto.Message {
@@ -113,9 +113,9 @@ func {{.MethodName}}(msg []byte, callback Callback) {
 	readStreamTemplate = template.Must(template.New("readStream").Parse(`
 {{.Comment}}
 //
-// NOTE: This method produces a stream of responses, and the callback
-// can be called zero or more times. After EOF error is returned, no
-// more responses will be produced.
+// NOTE: This method produces a stream of responses, and the receive stream can
+// be called zero or more times. After EOF error is returned, no more responses
+// will be produced.
 func {{.MethodName}}(msg []byte, rStream RecvStream) {
 	s := &readStreamHandler{
 		newProto: func() proto.Message {
@@ -150,10 +150,10 @@ func {{.MethodName}}(msg []byte, rStream RecvStream) {
 	biStreamTemplate = template.Must(template.New("biStream").Parse(`
 {{.Comment}}
 //
-// NOTE: This method produces a stream of responses, and the callback
-// can be called zero or more times. After EOF error is returned, no
-// more responses will be produced. The send stream can accept zero
-// or more requests before it is closed.
+// NOTE: This method produces a stream of responses, and the receive stream can
+// be called zero or more times. After EOF error is returned, no more responses
+// will be produced. The send stream can accept zero or more requests before it
+// is closed.
 func {{.MethodName}}(rStream RecvStream) (SendStream, error) {
 	b := &biStreamHandler{
 		newProto: func() proto.Message {
@@ -205,7 +205,7 @@ import (
 )
 
 // Callback is an interface that is passed in by callers of the library, and
-// specifies where the responses should be deliver.
+// specifies where the responses should be delivered.
 type Callback interface {
 	// OnResponse is called by the library when a response from the daemon
 	// for the associated RPC call is received. The reponse is a serialized
@@ -214,23 +214,22 @@ type Callback interface {
 	OnResponse([]byte)
 
 	// OnError is called by the library if any error is encountered during
-	// the execution of the RPC call, or if the response stream ends. No
-	// responses will be received after this.
+	// the execution of the RPC call.
 	OnError(error)
 }
 
 // RecvStream is an interface that is passed in by callers of the library, and
-// specifies where the responses should be deliver.
+// specifies where the streaming responses should be delivered.
 type RecvStream interface {
-	// OnResponse is called by the library when a response from the daemon
-	// for the associated RPC call is received. The reponse is a serialized
-	// protobuf for the expected response, and must be deserialized by the
-	// caller.
+	// OnResponse is called by the library when a new stream response from
+	// the daemon for the associated RPC call is available. The reponse is
+	// a serialized protobuf for the expected response, and must be
+	// deserialized by the caller.
 	OnResponse([]byte)
 
 	// OnError is called by the library if any error is encountered during
 	// the execution of the RPC call, or if the response stream ends. No
-	// responses will be received after this.
+	// more stream responses will be received after this.
 	OnError(error)
 }
 
