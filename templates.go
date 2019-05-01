@@ -82,6 +82,7 @@ type rpcParams struct {
 	MethodName  string
 	RequestType string
 	Comment     string
+	ApiPrefix   string
 }
 
 var (
@@ -90,7 +91,7 @@ var (
 //
 // NOTE: This method produces a single result or error, and the callback will
 // be called only once.
-func {{.MethodName}}(msg []byte, callback Callback) {
+func {{.ApiPrefix}}{{.MethodName}}(msg []byte, callback Callback) {
 	s := &syncHandler{
 		newProto: func() proto.Message {
 			return &{{.RequestType}}{}
@@ -119,7 +120,7 @@ func {{.MethodName}}(msg []byte, callback Callback) {
 // NOTE: This method produces a stream of responses, and the receive stream can
 // be called zero or more times. After EOF error is returned, no more responses
 // will be produced.
-func {{.MethodName}}(msg []byte, rStream RecvStream) {
+func {{.ApiPrefix}}{{.MethodName}}(msg []byte, rStream RecvStream) {
 	s := &readStreamHandler{
 		newProto: func() proto.Message {
 			return &{{.RequestType}}{}
@@ -157,7 +158,7 @@ func {{.MethodName}}(msg []byte, rStream RecvStream) {
 // be called zero or more times. After EOF error is returned, no more responses
 // will be produced. The send stream can accept zero or more requests before it
 // is closed.
-func {{.MethodName}}(rStream RecvStream) (SendStream, error) {
+func {{.ApiPrefix}}{{.MethodName}}(rStream RecvStream) (SendStream, error) {
 	b := &biStreamHandler{
 		newProto: func() proto.Message {
 			return &{{.RequestType}}{}

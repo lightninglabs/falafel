@@ -53,6 +53,12 @@ func main() {
 	}
 
 	buildTags := param["build_tags"]
+
+	apiPrefix := false
+	if param["api_prefix"] == "1" {
+		apiPrefix = true
+	}
+
 	// Extract the RPC call godoc from the proto.
 	godoc := make(map[string]string)
 	for _, f := range req.GetProtoFile() {
@@ -153,6 +159,9 @@ func main() {
 					MethodName:  name,
 					RequestType: m.GetInputType()[1:],
 					Comment:     godoc[name],
+				}
+				if apiPrefix {
+					p.ApiPrefix = p.ServiceName
 				}
 
 				clientStream := false
