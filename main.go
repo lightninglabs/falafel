@@ -52,6 +52,7 @@ func main() {
 		targetName = targetPkg[i+1:]
 	}
 
+	buildTags := param["build_tags"]
 	// Extract the RPC call godoc from the proto.
 	godoc := make(map[string]string)
 	for _, f := range req.GetProtoFile() {
@@ -127,6 +128,7 @@ func main() {
 				FileName:  filename,
 				Package:   pkg,
 				TargetPkg: targetPkg,
+				BuildTags: buildTags,
 			}
 			if err := headerTemplate.Execute(wr, params); err != nil {
 				log.Fatal(err)
