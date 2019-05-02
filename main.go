@@ -25,15 +25,21 @@ func main() {
 		log.Fatal(err)
 	}
 
+	split := func(parameter string, c string) map[string]string {
+		param := make(map[string]string)
+		for _, p := range strings.Split(parameter, c) {
+			if i := strings.Index(p, "="); i < 0 {
+				param[p] = ""
+			} else {
+				param[p[0:i]] = p[i+1:]
+			}
+		}
+		return param
+	}
+
 	// Parse the parameters handed to the plugin.
 	parameter := req.GetParameter()
-	param := make(map[string]string)
-	for _, p := range strings.Split(parameter, ",") {
-		if i := strings.Index(p, "="); i < 0 {
-			param[p] = ""
-		} else {
-			param[p[0:i]] = p[i+1:]
-		}
+	param := split(parameter, ",")
 	}
 
 	// We need package_name and target_package in order to continue.
