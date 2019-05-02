@@ -13,7 +13,18 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/protoc-gen-grpc-gateway/descriptor"
 )
 
+const version = "0.1"
+
 func main() {
+	maybeVersion := ""
+	if len(os.Args) > 1 {
+		maybeVersion = os.Args[1]
+	}
+	if maybeVersion == "-v" || maybeVersion == "--version" {
+		fmt.Println(version)
+		return
+	}
+
 	// Read the plugin output from protoc.
 	req, err := codegenerator.ParseRequest(os.Stdin)
 	if err != nil {
