@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/golang/protobuf/proto"
 
@@ -32,15 +31,12 @@ import (
 type serviceParams struct {
 	ServiceName string
 	TargetName  string
+	Listener    string
 }
 
 var serviceTemplate = template.Must(template.New("service").Parse(`
-var (
-	buf{{.ServiceName}}Lis = bufconn.Listen(100)
-)
-
 func get{{.ServiceName}}Conn() (*grpc.ClientConn, func(), error) {
-	conn, err := buf{{.ServiceName}}Lis.Dial()
+	conn, err := {{.Listener}}.Dial()
 	if err != nil {
 		return nil, nil, err
 	}

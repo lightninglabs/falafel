@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"log"
 	"os"
 
@@ -40,7 +41,16 @@ func main() {
 	// Parse the parameters handed to the plugin.
 	parameter := req.GetParameter()
 	param := split(parameter, ",")
+
+	// Further split the listener params by service name. They come in the
+	// following format:
+	// listeners=[service1=lis1 service2=lis2]
+	lis := param["listeners"]
+	if lis == "" {
+		log.Fatal("listeners not set")
 	}
+
+	listeners := split(lis, " ")
 
 	// We need package_name and target_package in order to continue.
 	pkg := param["package_name"]
@@ -125,7 +135,15 @@ func main() {
 
 		// For each sercie, we'll create a file with the generated api.
 		for _, s := range target.Services {
-			n := strings.ToLower(s.GetName())
+			name := s.GetName()
+			n := strings.ToLower(name)
+
+			listener := listeners[n]
+			if listener == "" {
+				log.Fatal(fmt.Sprintf("no listener set for "+
+					"service %s", n))
+			}
+
 			f, err := os.Create("./" + n + "_api_generated.go")
 			if err != nil {
 				log.Fatal(err)
@@ -148,8 +166,9 @@ func main() {
 
 			// Create service specific methods.
 			p := serviceParams{
-				ServiceName: s.GetName(),
+				ServiceName: name,
 				TargetName:  targetName,
+				Listener:    listener,
 			}
 			if err := serviceTemplate.Execute(wr, p); err != nil {
 				log.Fatal(err)
