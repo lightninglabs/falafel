@@ -234,21 +234,22 @@ func main() {
 	}
 
 	// Finally, with the service definitions successfully created, create
-	// the in memory grpc definitions.
-	f, err := os.Create("./memrpc_generated.go")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer f.Close()
+	// the in memory grpc definitions if requested.
+	if param["mem_rpc"] == "1" {
+		f, err := os.Create("./memrpc_generated.go")
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer f.Close()
 
-	wr := bufio.NewWriter(f)
-	defer wr.Flush()
+		wr := bufio.NewWriter(f)
+		defer wr.Flush()
 
-	p := memRpcParams{
-		Package: pkg,
+		p := memRpcParams{
+			Package: pkg,
+		}
+		if err := memRpcTemplate.Execute(wr, p); err != nil {
+			log.Fatal(err)
+		}
 	}
-	if err := memRpcTemplate.Execute(wr, p); err != nil {
-		log.Fatal(err)
-	}
-
 }
