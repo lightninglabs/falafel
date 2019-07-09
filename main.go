@@ -138,6 +138,7 @@ func main() {
 
 	// Go through the requested proto files to generate, and inspect the
 	// services they define.
+	var usedListeners []string
 	for _, filename := range req.FileToGenerate {
 		target, err := reg.LookupFile(filename)
 		if err != nil {
@@ -154,6 +155,8 @@ func main() {
 				log.Fatal(fmt.Sprintf("no listener set for "+
 					"service %s", n))
 			}
+
+			usedListeners = append(usedListeners, listener)
 
 			f, err := os.Create("./" + n + "_api_generated.go")
 			if err != nil {
@@ -246,7 +249,8 @@ func main() {
 		defer wr.Flush()
 
 		p := memRpcParams{
-			Package: pkg,
+			Package:   pkg,
+			Listeners: usedListeners,
 		}
 		if err := memRpcTemplate.Execute(wr, p); err != nil {
 			log.Fatal(err)
