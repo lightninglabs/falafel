@@ -1,4 +1,4 @@
-module github.com/halseth/promobile
+module github.com/halseth/falafel
 
 require (
 	github.com/ghodss/yaml v1.0.0 // indirect
