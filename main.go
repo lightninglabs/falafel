@@ -13,7 +13,7 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/protoc-gen-grpc-gateway/descriptor"
 )
 
-const toolName = "promobile"
+const toolName = "falafel"
 const version = "0.2"
 
 var versionString = fmt.Sprintf("%s %s", toolName, version)
