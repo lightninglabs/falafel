@@ -121,9 +121,10 @@ func main() {
 			method := c[:i]
 
 			// Insert comment // instead of every newline.
-			// TODO: empty newlines shouldn't have the trailing
-			// space.
 			c = strings.Replace(c, "\n", "\n// ", -1)
+
+			// Remove trailing spaces from comments.
+			c = strings.Replace(c, " \n//", "\n//", -1)
 
 			// Add a leading comment // and remove the traling
 			// one.
