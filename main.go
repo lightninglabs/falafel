@@ -13,7 +13,10 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/protoc-gen-grpc-gateway/descriptor"
 )
 
+const toolName = "promobile"
 const version = "0.2"
+
+var versionString = fmt.Sprintf("%s %s", toolName, version)
 
 func main() {
 	maybeVersion := ""
@@ -170,6 +173,7 @@ func main() {
 
 			// Create the file header.
 			params := headerParams{
+				ToolName:  versionString,
 				FileName:  filename,
 				Package:   pkg,
 				TargetPkg: targetPkg,
@@ -250,6 +254,7 @@ func main() {
 		defer wr.Flush()
 
 		p := memRpcParams{
+			ToolName:  versionString,
 			Package:   pkg,
 			Listeners: usedListeners,
 		}
