@@ -42,6 +42,10 @@ func main() {
 
 	split := func(parameter string, c string) map[string]string {
 		param := make(map[string]string)
+		if parameter == "" {
+			return param
+		}
+
 		for _, p := range strings.Split(parameter, c) {
 			if i := strings.Index(p, "="); i < 0 {
 				param[p] = ""
@@ -60,11 +64,11 @@ func main() {
 	// following format:
 	// listeners=[service1=lis1 service2=lis2]
 	lis := param["listeners"]
-	if lis == "" {
-		log.Fatal("listeners not set")
-	}
-
 	listeners := split(lis, " ")
+
+	// For services where the listener is not specified, we can use a
+	// default listener if provided.
+	defaultLis := param["defaultlistener"]
 
 	// We need package_name and target_package in order to continue.
 	pkg := param["package_name"]
@@ -156,8 +160,11 @@ func main() {
 
 			listener := listeners[n]
 			if listener == "" {
-				log.Fatal(fmt.Sprintf("no listener set for "+
-					"service %s", n))
+				if defaultLis == "" {
+					log.Fatal(fmt.Sprintf("no listener set for "+
+						"service %s", n))
+				}
+				listener = defaultLis
 			}
 
 			usedListeners = append(usedListeners, listener)
