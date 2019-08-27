@@ -56,22 +56,22 @@ func get{{.ServiceName}}Conn() (*grpc.ClientConn, func(), error) {
 		return nil, nil, err
 	}
 
-	close := func() {
+	closeConn := func() {
 		conn.Close()
 	}
 
-	return clientConn, close, nil
+	return clientConn, closeConn, nil
 }
 
 // get{{.ServiceName}}Client returns a client connection to the server listening
 // on lis.
 func get{{.ServiceName}}Client() ({{.TargetName}}.{{.ServiceName}}Client, func(), error) {
-	clientConn, close, err := get{{.ServiceName}}Conn()
+	clientConn, closeConn, err := get{{.ServiceName}}Conn()
 	if err != nil {
 		return nil, nil, err
 	}
 	client := {{.TargetName}}.New{{.ServiceName}}Client(clientConn)
-	return client, close, nil
+	return client, closeConn, nil
 }
 `))
 
@@ -98,11 +98,11 @@ func {{.ApiPrefix}}{{.MethodName}}(msg []byte, callback Callback) {
 			req proto.Message) (proto.Message, error) {
 
 			// Get the gRPC client.
-			client, close, err := get{{.ServiceName}}Client()
+			client, closeClient, err := get{{.ServiceName}}Client()
 			if err != nil {
 				return nil, err
 			}
-			defer close()
+			defer closeClient()
 
 			r := req.(*{{.RequestType}})
 			return client.{{.MethodName}}(ctx, r)
@@ -127,7 +127,7 @@ func {{.ApiPrefix}}{{.MethodName}}(msg []byte, rStream RecvStream) {
 			req proto.Message) (*receiver, func(), error) {
 
 			// Get the gRPC client.
-			client, close, err := get{{.ServiceName}}Client()
+			client, closeClient, err := get{{.ServiceName}}Client()
 			if err != nil {
 				return nil, nil, err
 			}
@@ -135,14 +135,14 @@ func {{.ApiPrefix}}{{.MethodName}}(msg []byte, rStream RecvStream) {
 			r := req.(*{{.RequestType}})
 			stream, err := client.{{.MethodName}}(ctx, r)
 			if err != nil {
-				close()
+				closeClient()
 				return nil, nil, err
 			}
 			return &receiver{
 				recv: func() (proto.Message, error) {
 					return stream.Recv()
 				},
-			}, close, nil
+			}, closeClient, nil
 		},
 	}
 	s.start(msg, rStream)
@@ -164,14 +164,14 @@ func {{.ApiPrefix}}{{.MethodName}}(rStream RecvStream) (SendStream, error) {
 		biStream: func(ctx context.Context) (*receiver, *sender, func(), error) {
 
 			// Get the gRPC client.
-			client, close, err := get{{.ServiceName}}Client()
+			client, closeClient, err := get{{.ServiceName}}Client()
 			if err != nil {
 				return nil, nil, nil, err
 			}
 
 			stream, err := client.{{.MethodName}}(ctx)
 			if err != nil {
-				close()
+				closeClient()
 				return nil, nil, nil, err
 			}
 			return &receiver{
@@ -184,8 +184,8 @@ func {{.ApiPrefix}}{{.MethodName}}(rStream RecvStream) (SendStream, error) {
 						r := req.(*{{.RequestType}})
 						return stream.Send(r)
 					},
-					close: stream.CloseSend,
-				}, close, nil
+					closeStream: stream.CloseSend,
+				}, closeClient, nil
 		},
 	}
 	return b.start(rStream)
@@ -289,8 +289,8 @@ type sender struct {
 	// send sends the given message to the request stream.
 	send func(proto.Message) error
 
-	// close closes the request stream.
-	close func() error
+	// closeStream closes the request stream.
+	closeStream func() error
 }
 
 // syncHandler is a struct used to call the daemon's RPC interface on methods
@@ -380,12 +380,12 @@ func (s *readStreamHandler) start(msg []byte, rStream RecvStream) {
 
 		// Call the desired method on the client using the decoded gRPC
 		// request, and get the receive stream back.
-		stream, close, err := s.recvStream(ctx, req)
+		stream, closeStream, err := s.recvStream(ctx, req)
 		if err != nil {
 			rStream.OnError(err)
 			return
 		}
-		defer close()
+		defer closeStream()
 
 		// We will read responses from the stream until we encounter an
 		// error.
@@ -428,7 +428,7 @@ func (b *biStreamHandler) start(rStream RecvStream) (SendStream, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Start a bidirectional stream for the desired RPC method.
-	r, s, close, err := b.biStream(ctx)
+	r, s, closeStream, err := b.biStream(ctx)
 	if err != nil {
 		cancel()
 		return nil, err
@@ -449,14 +449,14 @@ func (b *biStreamHandler) start(rStream RecvStream) (SendStream, error) {
 			// Send the request to the server.
 			return s.send(req)
 		},
-		stop: s.close,
+		stop: s.closeStream,
 	}
 
 	// Now launch a goroutine that will handle the asynchronous stream of
 	// responses.
 	go func() {
 		defer cancel()
-		defer close()
+		defer closeStream()
 
 		// We will read responses from the recv stream until we
 		// encounter an error.
