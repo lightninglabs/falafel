@@ -8,3 +8,5 @@ require (
 	google.golang.org/genproto v0.0.0-20181004005441-af9cb2a35e7f // indirect
 	gopkg.in/yaml.v2 v2.2.1 // indirect
 )
+
+go 1.13
