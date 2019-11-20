@@ -146,7 +146,6 @@ func main() {
 
 	// Go through the requested proto files to generate, and inspect the
 	// services they define.
-	var usedListeners []string
 	for _, filename := range req.FileToGenerate {
 		target, err := reg.LookupFile(filename)
 		if err != nil {
@@ -166,8 +165,6 @@ func main() {
 				}
 				listener = defaultLis
 			}
-
-			usedListeners = append(usedListeners, listener)
 
 			f, err := os.Create("./" + n + "_api_generated.go")
 			if err != nil {
@@ -251,6 +248,11 @@ func main() {
 	// Finally, with the service definitions successfully created, create
 	// the in memory grpc definitions if requested.
 	if param["mem_rpc"] == "1" {
+		var usedListeners []string
+		for _, listener := range listeners {
+			usedListeners = append(usedListeners, listener)
+		}
+
 		f, err := os.Create("./memrpc_generated.go")
 		if err != nil {
 			log.Fatal(err)
