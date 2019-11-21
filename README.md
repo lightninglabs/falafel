@@ -29,13 +29,14 @@ pkg="lndmobile"
 target_pkg="github.com/lightningnetwork/lnd/lnrpc"
 
 # A mapping from grpc service to name of the custom listeners. The grpc server
-must be configured to listen on these.
+# must be configured to listen on these.
 listeners="lightning=lightningLis walletunlocker=walletUnlockerLis"
 
 # Set to 1 to create boiler plate grpc client code and listeners. If more than
-one proto file is being parsed, it should only be done once.  create_rpc=1
+# one proto file is being parsed, it should only be done once.
+mem_rpc=1
 
-opts="package_name=$pkg,target_package=$target_pkg,listeners=$listeners,mem_rpc=$create_rpc"
+opts="package_name=$pkg,target_package=$target_pkg,listeners=$listeners,mem_rpc=$mem_rpc"
 protoc -I/usr/local/include -I. \
        -I$GOPATH/src/github.com/grpc-ecosystem/grpc-gateway/third_party/googleapis \
        --plugin=protoc-gen-custom=$falafel\
@@ -50,8 +51,8 @@ start the gRPC service:
 
 ```go
 func Start() {
-        // We call the main method with the custom in-memory listeners called
-        // by the mobile APIs, such that the grpc server will use these.
+	// We call the main method with the custom in-memory listeners called
+	// by the mobile APIs, such that the grpc server will use these.
 	cfg := lnd.ListenerCfg{
 		WalletUnlocker: walletUnlockerLis,
 		RPCListener:    lightningLis,
