@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"text/template"
 
 	"strings"
 
@@ -271,4 +272,25 @@ func main() {
 			log.Fatal(err)
 		}
 	}
+}
+
+var funcMap = template.FuncMap{
+	"LowerCase": lowerCase,
+	"UpperCase": upperCase,
+}
+
+func lowerCase(s string) string {
+	if s == "" {
+		return ""
+	}
+
+	return strings.ToLower(s[:1]) + s[1:]
+}
+
+func upperCase(s string) string {
+	if s == "" {
+		return ""
+	}
+
+	return strings.ToUpper(s[:1]) + s[1:]
 }

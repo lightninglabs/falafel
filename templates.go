@@ -35,7 +35,7 @@ type serviceParams struct {
 	Listener    string
 }
 
-var serviceTemplate = template.Must(template.New("service").Parse(`
+var serviceTemplate = template.Must(template.New("service").Funcs(funcMap).Parse(`
 func get{{.ServiceName}}Conn() (*grpc.ClientConn, func(), error) {
 	conn, err := {{.Listener}}.Dial()
 	if err != nil {
