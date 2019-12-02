@@ -20,7 +20,6 @@ package {{.Package}}
 import (
 	"context"
 	"net"
-	"time"
 
 	"google.golang.org/grpc"
 
@@ -43,14 +42,18 @@ func get{{.ServiceName}}Conn() (*grpc.ClientConn, func(), error) {
 		return nil, nil, err
 	}
 
-	clientConn, err := grpc.Dial("",
-		grpc.WithDialer(func(target string,
-			timeout time.Duration) (net.Conn, error) {
-			return conn, nil
-		}),
-		grpc.WithInsecure(),
-		grpc.WithBackoffMaxDelay(10*time.Second),
-	)
+	// Set up a custom dialer using the listener conn.
+	dialer := func(context.Context, string) (net.Conn, error) {
+		return conn, nil
+	}
+
+	// Create a dial options array.
+	opts := []grpc.DialOption{
+		grpc.WithContextDialer(dialer),
+	}
+
+	address := conn.RemoteAddr().String()
+	clientConn, err := grpc.Dial(address, opts...)
 	if err != nil {
 		conn.Close()
 		return nil, nil, err
