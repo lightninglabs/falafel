@@ -264,11 +264,29 @@ func main() {
 		defer wr.Flush()
 
 		p := memRpcParams{
+			ToolName: versionString,
+			Package:  pkg,
+		}
+		if err := memRpcTemplate.Execute(wr, p); err != nil {
+			log.Fatal(err)
+		}
+
+		lisf, err := os.Create("./listeners_generated.go")
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer lisf.Close()
+
+		liswr := bufio.NewWriter(lisf)
+		defer liswr.Flush()
+
+		lisp := listenersParams{
 			ToolName:  versionString,
 			Package:   pkg,
 			Listeners: usedListeners,
 		}
-		if err := memRpcTemplate.Execute(wr, p); err != nil {
+		err = listenersTemplate.Execute(liswr, lisp)
+		if err != nil {
 			log.Fatal(err)
 		}
 	}
