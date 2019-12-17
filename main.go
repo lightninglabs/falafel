@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"text/template"
 
 	"strings"
 
@@ -14,7 +15,7 @@ import (
 )
 
 const toolName = "falafel"
-const version = "0.5"
+const version = "0.6"
 
 var versionString = fmt.Sprintf("%s %s", toolName, version)
 
@@ -263,12 +264,51 @@ func main() {
 		defer wr.Flush()
 
 		p := memRpcParams{
-			ToolName:  versionString,
-			Package:   pkg,
-			Listeners: usedListeners,
+			ToolName: versionString,
+			Package:  pkg,
 		}
 		if err := memRpcTemplate.Execute(wr, p); err != nil {
 			log.Fatal(err)
 		}
+
+		lisf, err := os.Create("./listeners_generated.go")
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer lisf.Close()
+
+		liswr := bufio.NewWriter(lisf)
+		defer liswr.Flush()
+
+		lisp := listenersParams{
+			ToolName:  versionString,
+			Package:   pkg,
+			Listeners: usedListeners,
+		}
+		err = listenersTemplate.Execute(liswr, lisp)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
+}
+
+var funcMap = template.FuncMap{
+	"LowerCase": lowerCase,
+	"UpperCase": upperCase,
+}
+
+func lowerCase(s string) string {
+	if s == "" {
+		return ""
+	}
+
+	return strings.ToLower(s[:1]) + s[1:]
+}
+
+func upperCase(s string) string {
+	if s == "" {
+		return ""
+	}
+
+	return strings.ToUpper(s[:1]) + s[1:]
 }
