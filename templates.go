@@ -119,7 +119,8 @@ func get{{$lis | UpperCase}}Conn() (*grpc.ClientConn, func(), error) {
 	// Apply any global server options.
 	opts = apply{{$lis | UpperCase}}DialOptions(opts)
 
-	address := conn.RemoteAddr().String()
+	// As address we use "localhost" to mimic a local connection.
+	address := "localhost"
 	clientConn, err := grpc.Dial(address, opts...)
 	if err != nil {
 		conn.Close()
