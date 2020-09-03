@@ -47,12 +47,11 @@ import (
 )
 var (
 {{range $lis := .Listeners}}
-	// {{$lis}} is a global in-memory buffer that listeners that is
+	// {{$lis}} is a global in-memory buffer listeners that is
 	// referenced by the generated mobile APIs, such that all client calls
 	// will be going through it.
-	{{$lis}} = bufconn.Listen(100)
-
-{{end}}
+	{{$lis}} *bufconn.Listener
+{{-end}}
 	// serviceDialOptions is a global map from service names to a method
 	// that is used to retrieve extra grpc options we'll apply every time
 	// we dial the service's grpc server, such as TLS certificates.
@@ -68,6 +67,16 @@ var (
 	// to the above options variables.
 	serviceDialOptionsMtx sync.Mutex
 )
+
+
+// NewListeners will create in-memory buffers listeners that will be
+// referenced by the generated mobile APIs. This has to be called and
+// and handed over to the gRPC server on startup.
+func NewListeners() {
+{{range $lis := .Listeners}}
+	{{$lis}} = bufconn.Listen(100)
+{{- end}}
+}
 
 // setDefaultDialOption sets the global default gprc option method.
 func setDefaultDialOption(f func()([]grpc.DialOption, error)) {
