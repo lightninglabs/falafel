@@ -46,8 +46,8 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 var (
-{{range $lis := .Listeners}}
-	// {{$lis}} is a global in-memory buffer that listeners that is
+{{- range $lis := .Listeners}}
+	// {{$lis}} is a global in-memory buffer listeners that is
 	// referenced by the generated mobile APIs, such that all client calls
 	// will be going through it.
 	{{$lis}} = bufconn.Listen(100)
@@ -68,6 +68,16 @@ var (
 	// to the above options variables.
 	serviceDialOptionsMtx sync.Mutex
 )
+
+
+// RecreateListeners will re-create the in-memory listeners that will be
+// referenced by the generated mobile APIs. This has to be called if the gRPC
+// server has been restarted
+func RecreateListeners() {
+{{- range $lis := .Listeners}}
+	{{$lis}} = bufconn.Listen(100)
+{{- end}}
+}
 
 // setDefaultDialOption sets the global default gprc option method.
 func setDefaultDialOption(f func()([]grpc.DialOption, error)) {
