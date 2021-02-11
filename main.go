@@ -249,9 +249,19 @@ func main() {
 	// Finally, with the service definitions successfully created, create
 	// the in memory grpc definitions if requested.
 	if param["mem_rpc"] == "1" {
-		var usedListeners []string
+		var (
+			usedListeners []string
+			added         = make(map[string]struct{})
+		)
 		for _, listener := range listeners {
+			// Skip listeners already added to the slice, to avoid
+			// the definitions being created multiple times.
+			if _, ok := added[listener]; ok {
+				continue
+			}
+
 			usedListeners = append(usedListeners, listener)
+			added[listener] = struct{}{}
 		}
 
 		f, err := os.Create("./memrpc_generated.go")
