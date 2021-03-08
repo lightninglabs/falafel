@@ -19,8 +19,10 @@ package {{.Package}}
 
 import (
 	"context"
+	"net"
 
 	"github.com/golang/protobuf/proto"
+	"google.golang.org/grpc"
 
 	"{{.TargetPkg}}"
 )
@@ -38,9 +40,7 @@ var listenersTemplate = template.Must(template.New("mem").
 package {{.Package}}
 
 import (
-	"net"
 	"sync"
-	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
