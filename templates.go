@@ -26,26 +26,6 @@ import (
 )
 `))
 
-type serviceParams struct {
-	ServiceName string
-	TargetName  string
-	Listener    string
-}
-
-var serviceTemplate = template.Must(template.New("service").Funcs(funcMap).Parse(`
-
-// get{{.ServiceName}}Client returns a client connection to the server listening
-// on lis.
-func get{{.ServiceName}}Client() ({{.TargetName}}.{{.ServiceName}}Client, func(), error) {
-	clientConn, closeConn, err := get{{.Listener | UpperCase}}Conn()
-	if err != nil {
-		return nil, nil, err
-	}
-	client := {{.TargetName}}.New{{.ServiceName}}Client(clientConn)
-	return client, closeConn, nil
-}
-`))
-
 type listenersParams struct {
 	ToolName  string
 	Package   string
@@ -65,43 +45,79 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
 )
-{{range $lis := .Listeners}}
 var (
+{{range $lis := .Listeners}}
 	// {{$lis}} is a global in-memory buffer that listeners that is
 	// referenced by the generated mobile APIs, such that all client calls
 	// will be going through it.
 	{{$lis}} = bufconn.Listen(100)
 
-	// {{$lis}}DialOptions holds extra grpc options we'll apply
-	// every time we dial the grpc server, such as TLS certificates.
-	{{$lis}}DialOptions []grpc.DialOption
+{{end}}
+	// serviceDialOptions is a global map from service names to a method
+	// that is used to retrieve extra grpc options we'll apply every time
+	// we dial the service's grpc server, such as TLS certificates.
+	serviceDialOptions = make(map[string]func() ([]grpc.DialOption, error))
 
-	// {{$lis}}OptionsMtx is a mutex used to grant exclusive acces
-	// to the options slice.
-	{{$lis}}OptionsMtx sync.Mutex
+	// defaultDialOptions returns extra grpc options we'll apply in case
+	// the service is not found in the serviceDialOptions.
+	defaultDialOptions = func() ([]grpc.DialOption, error){
+		return nil, nil
+	}
+
+	// serviceDialOptionsMtx is a mutex used to grant exclusive access
+	// to the above options variables.
+	serviceDialOptionsMtx sync.Mutex
 )
 
-// add{{$lis | UpperCase}}DialOption to our list of global gprc options.
-func add{{$lis | UpperCase}}DialOption(o ...grpc.DialOption) {
-	{{$lis}}OptionsMtx.Lock()
-	defer {{$lis}}OptionsMtx.Unlock()
+// setDefaultDialOption sets the global default gprc option method.
+func setDefaultDialOption(f func()([]grpc.DialOption, error)) {
+	serviceDialOptionsMtx.Lock()
+	defer serviceDialOptionsMtx.Unlock()
 
-	{{$lis}}DialOptions = append({{$lis}}DialOptions, o...)
+	defaultDialOptions  = f
 }
 
-// apply{{$lis | UpperCase}}DialOptions applies the global grpc options to the
-// given slice of options.
-func apply{{$lis | UpperCase}}DialOptions(opts []grpc.DialOption) []grpc.DialOption {
-	{{$lis}}OptionsMtx.Lock()
-	defer {{$lis}}OptionsMtx.Unlock()
+`))
 
-	return append(opts, {{$lis}}DialOptions...)
+type serviceParams struct {
+	ServiceName string
+	TargetName  string
+	Listener    string
 }
 
-// get{{$lis | UpperCase}}Conn dials {{$lis}} with the current dial options,
+var serviceTemplate = template.Must(template.New("service").Funcs(funcMap).Parse(`
+
+// set{{.ServiceName | UpperCase}}DialOption sets the given method as the way
+// to retrieve gprc options for the service.
+func set{{.ServiceName | UpperCase}}DialOption(f func()([]grpc.DialOption, error)) {
+	serviceDialOptionsMtx.Lock()
+	defer serviceDialOptionsMtx.Unlock()
+
+	serviceDialOptions["{{.ServiceName}}"] = f
+}
+
+
+// apply{{.ServiceName | UpperCase}}DialOptions returns extra grpc options to
+// use when calling the service.
+func apply{{.ServiceName | UpperCase}}DialOptions() ([]grpc.DialOption, error) {
+	serviceDialOptionsMtx.Lock()
+	defer serviceDialOptionsMtx.Unlock()
+
+	// First check the service options map, if there are any options
+	// specific to this service.
+	f, ok := serviceDialOptions["{{.ServiceName}}"]
+	if ok {
+		return f()
+	}
+
+	// Otherwise return the default options.
+	return defaultDialOptions()
+}
+
+// get{{.ServiceName | UpperCase}}Conn dials {{.ServiceName}} with the current dial options,
 // and returns the grpc client connection.
-func get{{$lis | UpperCase}}Conn() (*grpc.ClientConn, func(), error) {
-	conn, err := {{$lis}}.Dial()
+func get{{.ServiceName | UpperCase}}Conn() (*grpc.ClientConn, func(), error) {
+	conn, err := {{.Listener}}.Dial()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -116,8 +132,13 @@ func get{{$lis | UpperCase}}Conn() (*grpc.ClientConn, func(), error) {
 		grpc.WithContextDialer(dialer),
 	}
 
-	// Apply any global server options.
-	opts = apply{{$lis | UpperCase}}DialOptions(opts)
+	// Apply any extra server options.
+	extraOpts, err := apply{{.ServiceName | UpperCase}}DialOptions()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	opts = append(opts, extraOpts...)
 
 	// As address we use "localhost" to mimic a local connection.
 	address := "localhost"
@@ -133,7 +154,17 @@ func get{{$lis | UpperCase}}Conn() (*grpc.ClientConn, func(), error) {
 
 	return clientConn, closeConn, nil
 }
-{{end}}
+
+// get{{.ServiceName}}Client returns a client connection to the server listening
+// on lis.
+func get{{.ServiceName}}Client() ({{.TargetName}}.{{.ServiceName}}Client, func(), error) {
+	clientConn, closeConn, err := get{{.ServiceName | UpperCase}}Conn()
+	if err != nil {
+		return nil, nil, err
+	}
+	client := {{.TargetName}}.New{{.ServiceName}}Client(clientConn)
+	return client, closeConn, nil
+}
 `))
 
 type rpcParams struct {
