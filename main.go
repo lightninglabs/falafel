@@ -98,8 +98,12 @@ func main() {
 	}
 
 	// Go through the requested proto files to generate, and inspect the
-	// services they define.
-	genMobileStubs(param, godoc, req, reg)
+	// services they define. We either generate for mobile or for JS.
+	if param["js_stubs"] == "1" {
+		genJSStubs(param, req, reg)
+	} else {
+		genMobileStubs(param, godoc, req, reg)
+	}
 
 	// Finally, with the service definitions successfully created, create
 	// the in memory grpc definitions if requested.
@@ -201,6 +205,10 @@ func genMobileStubs(param, godoc map[string]string,
 				p := rpcParams{
 					ServiceName: s.GetName(),
 					MethodName:  name,
+					// Type names are returned with an
+					// initial dot, e.g.
+					// .lnrpc.GetInfoRequest, we just strip
+					// that dot away.
 					RequestType: m.GetInputType()[1:],
 					Comment:     godoc[name],
 				}
@@ -237,6 +245,98 @@ func genMobileStubs(param, godoc map[string]string,
 				default:
 					log.Fatal("unexpected method type")
 				}
+			}
+
+			if err := wr.Flush(); err != nil {
+				log.Fatal(err)
+			}
+			if err := f.Close(); err != nil {
+				log.Fatal(err)
+			}
+		}
+	}
+}
+
+func genJSStubs(param map[string]string, req *plugin.CodeGeneratorRequest,
+	reg *descriptor.Registry) {
+
+	// We need package_name and target_package in order to continue.
+	pkg := param["package_name"]
+	if pkg == "" {
+		log.Fatal("package name not set")
+	}
+
+	buildTag := param["build_tags"]
+	manualImport := param["manual_import"]
+
+	for _, filename := range req.FileToGenerate {
+		target, err := reg.LookupFile(filename)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// For each service, we'll create a file with the generated api.
+		for _, s := range target.Services {
+			name := s.GetName()
+			n := strings.ToLower(name)
+
+			f, err := os.Create("./" + n + ".pb.json.go")
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			wr := bufio.NewWriter(f)
+
+			// Create the file header.
+			params := jsHeaderParams{
+				ToolName:     versionString,
+				FileName:     filename,
+				ServiceName:  name,
+				Package:      pkg,
+				ManualImport: manualImport,
+				BuildTag:     buildTag,
+			}
+
+			// Go through each method defined by the service, and
+			// call the appropriate template, depending on the RPC
+			// type.
+			for _, m := range s.Methods {
+				name := m.GetName()
+
+				// Type names are returned with an initial dot,
+				// e.g. .lnrpc.GetInfoRequest, we just strip
+				// that dot away.
+				inputType := m.GetInputType()[1:]
+				if strings.Contains(inputType, pkg) {
+					inputType = strings.ReplaceAll(
+						inputType, pkg+".", "",
+					)
+				}
+
+				p := jsRpcParams{
+					MethodName:  name,
+					ServiceName: s.GetName(),
+					RequestType: inputType,
+				}
+
+				clientStream := false
+				if m.ClientStreaming != nil {
+					clientStream = *m.ClientStreaming
+				}
+
+				if m.ServerStreaming != nil {
+					p.ResponseStreaming = *m.ServerStreaming
+				}
+
+				if clientStream {
+					continue
+				}
+
+				params.Methods = append(params.Methods, p)
+			}
+
+			if err := jsTemplate.Execute(wr, params); err != nil {
+				log.Fatal(err)
 			}
 
 			if err := wr.Flush(); err != nil {
