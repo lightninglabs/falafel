@@ -10,12 +10,13 @@ import (
 	"strings"
 
 	"github.com/golang/protobuf/protoc-gen-go/generator"
+	plugin "github.com/golang/protobuf/protoc-gen-go/plugin"
 	"github.com/grpc-ecosystem/grpc-gateway/codegenerator"
 	"github.com/grpc-ecosystem/grpc-gateway/protoc-gen-grpc-gateway/descriptor"
 )
 
 const toolName = "falafel"
-const version = "0.9.0"
+const version = "0.9.1"
 
 var versionString = fmt.Sprintf("%s %s", toolName, version)
 
@@ -41,58 +42,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	split := func(parameter string, c string) map[string]string {
-		param := make(map[string]string)
-		if parameter == "" {
-			return param
-		}
-
-		for _, p := range strings.Split(parameter, c) {
-			if i := strings.Index(p, "="); i < 0 {
-				param[p] = ""
-			} else {
-				param[p[0:i]] = p[i+1:]
-			}
-		}
-		return param
-	}
-
 	// Parse the parameters handed to the plugin.
 	parameter := req.GetParameter()
 	param := split(parameter, ",")
-
-	// Further split the listener params by service name. They come in the
-	// following format:
-	// listeners=[service1=lis1 service2=lis2]
-	lis := param["listeners"]
-	listeners := split(lis, " ")
-
-	// For services where the listener is not specified, we can use a
-	// default listener if provided.
-	defaultLis := param["defaultlistener"]
-
-	// We need package_name and target_package in order to continue.
-	pkg := param["package_name"]
-	if pkg == "" {
-		log.Fatal("package name not set")
-	}
-
-	targetPkg := param["target_package"]
-	if targetPkg == "" {
-		log.Fatal("target package not set")
-	}
-
-	targetName := ""
-	if i := strings.LastIndex(targetPkg, "/"); i > 0 {
-		targetName = targetPkg[i+1:]
-	}
-
-	buildTags := param["build_tags"]
-
-	apiPrefix := false
-	if param["api_prefix"] == "1" {
-		apiPrefix = true
-	}
 
 	// Extract the RPC call godoc from the proto.
 	godoc := make(map[string]string)
@@ -147,13 +99,58 @@ func main() {
 
 	// Go through the requested proto files to generate, and inspect the
 	// services they define.
+	genMobileStubs(param, godoc, req, reg)
+
+	// Finally, with the service definitions successfully created, create
+	// the in memory grpc definitions if requested.
+	if param["mem_rpc"] == "1" {
+		genMemRPC(param)
+	}
+}
+
+func genMobileStubs(param, godoc map[string]string,
+	req *plugin.CodeGeneratorRequest, reg *descriptor.Registry) {
+
+	// We need package_name and target_package in order to continue.
+	pkg := param["package_name"]
+	if pkg == "" {
+		log.Fatal("package name not set")
+	}
+
+	// Further split the listener params by service name. They come in the
+	// following format:
+	// listeners=[service1=lis1 service2=lis2]
+	lis := param["listeners"]
+	listeners := split(lis, " ")
+
+	// For services where the listener is not specified, we can use a
+	// default listener if provided.
+	defaultLis := param["defaultlistener"]
+
+	targetPkg := param["target_package"]
+	if targetPkg == "" {
+		log.Fatal("target package not set")
+	}
+
+	targetName := ""
+	if i := strings.LastIndex(targetPkg, "/"); i > 0 {
+		targetName = targetPkg[i+1:]
+	}
+
+	buildTags := param["build_tags"]
+
+	apiPrefix := false
+	if param["api_prefix"] == "1" {
+		apiPrefix = true
+	}
+
 	for _, filename := range req.FileToGenerate {
 		target, err := reg.LookupFile(filename)
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		// For each sercie, we'll create a file with the generated api.
+		// For each service, we'll create a file with the generated api.
 		for _, s := range target.Services {
 			name := s.GetName()
 			n := strings.ToLower(name)
@@ -171,10 +168,8 @@ func main() {
 			if err != nil {
 				log.Fatal(err)
 			}
-			defer f.Close()
 
 			wr := bufio.NewWriter(f)
-			defer wr.Flush()
 
 			// Create the file header.
 			params := headerParams{
@@ -243,63 +238,102 @@ func main() {
 					log.Fatal("unexpected method type")
 				}
 			}
-		}
-	}
 
-	// Finally, with the service definitions successfully created, create
-	// the in memory grpc definitions if requested.
-	if param["mem_rpc"] == "1" {
-		var (
-			usedListeners []string
-			added         = make(map[string]struct{})
-		)
-		for _, listener := range listeners {
-			// Skip listeners already added to the slice, to avoid
-			// the definitions being created multiple times.
-			if _, ok := added[listener]; ok {
-				continue
+			if err := wr.Flush(); err != nil {
+				log.Fatal(err)
 			}
-
-			usedListeners = append(usedListeners, listener)
-			added[listener] = struct{}{}
-		}
-
-		f, err := os.Create("./memrpc_generated.go")
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer f.Close()
-
-		wr := bufio.NewWriter(f)
-		defer wr.Flush()
-
-		p := memRpcParams{
-			ToolName: versionString,
-			Package:  pkg,
-		}
-		if err := memRpcTemplate.Execute(wr, p); err != nil {
-			log.Fatal(err)
-		}
-
-		lisf, err := os.Create("./listeners_generated.go")
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer lisf.Close()
-
-		liswr := bufio.NewWriter(lisf)
-		defer liswr.Flush()
-
-		lisp := listenersParams{
-			ToolName:  versionString,
-			Package:   pkg,
-			Listeners: usedListeners,
-		}
-		err = listenersTemplate.Execute(liswr, lisp)
-		if err != nil {
-			log.Fatal(err)
+			if err := f.Close(); err != nil {
+				log.Fatal(err)
+			}
 		}
 	}
+}
+
+func genMemRPC(param map[string]string) {
+	// We need package_name and target_package in order to continue.
+	pkg := param["package_name"]
+	if pkg == "" {
+		log.Fatal("package name not set")
+	}
+
+	// Further split the listener params by service name. They come in the
+	// following format:
+	// listeners=[service1=lis1 service2=lis2]
+	lis := param["listeners"]
+	listeners := split(lis, " ")
+
+	var (
+		usedListeners []string
+		added         = make(map[string]struct{})
+	)
+	for _, listener := range listeners {
+		// Skip listeners already added to the slice, to avoid
+		// the definitions being created multiple times.
+		if _, ok := added[listener]; ok {
+			continue
+		}
+
+		usedListeners = append(usedListeners, listener)
+		added[listener] = struct{}{}
+	}
+
+	f, err := os.Create("./memrpc_generated.go")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	wr := bufio.NewWriter(f)
+	p := memRpcParams{
+		ToolName: versionString,
+		Package:  pkg,
+	}
+	if err := memRpcTemplate.Execute(wr, p); err != nil {
+		log.Fatal(err)
+	}
+	if err := wr.Flush(); err != nil {
+		log.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		log.Fatal(err)
+	}
+
+	lisf, err := os.Create("./listeners_generated.go")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	liswr := bufio.NewWriter(lisf)
+	lisp := listenersParams{
+		ToolName:  versionString,
+		Package:   pkg,
+		Listeners: usedListeners,
+	}
+	err = listenersTemplate.Execute(liswr, lisp)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := liswr.Flush(); err != nil {
+		log.Fatal(err)
+	}
+	if err := lisf.Close(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func split(parameter string, c string) map[string]string {
+	param := make(map[string]string)
+	if parameter == "" {
+		return param
+	}
+
+	for _, p := range strings.Split(parameter, c) {
+		if i := strings.Index(p, "="); i < 0 {
+			param[p] = ""
+		} else {
+			param[p[0:i]] = p[i+1:]
+		}
+	}
+	return param
 }
 
 var funcMap = template.FuncMap{
