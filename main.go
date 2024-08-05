@@ -97,25 +97,18 @@ func extractComments(file *protogen.File) map[string]string {
 
 		// Find the first newline. The actual comment will start
 		// following this.
-		i := 0
-		for j := range c {
-			if c[j] == '\n' {
-				i = j
-				break
-			}
+		index := strings.Index(c, "\n")
+		if index != -1 {
+			c = c[index+1:]
 		}
-		c = c[i+1:]
 
 		// Find the first space. The method's name will be all
 		// characters up to that space.
-		i = 0
-		for j := range c {
-			if c[j] == ' ' {
-				i = j
-				break
-			}
+		index = strings.Index(c, " ")
+		method := c
+		if index != -1 {
+			method = c[:index]
 		}
-		method := c[:i]
 
 		// Insert comment // instead of every newline.
 		c = strings.Replace(c, "\n", "\n// ", -1)
