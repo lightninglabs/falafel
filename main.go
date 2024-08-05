@@ -8,6 +8,7 @@ import (
 	"text/template"
 
 	"google.golang.org/protobuf/compiler/protogen"
+	"google.golang.org/protobuf/types/pluginpb"
 )
 
 const toolName = "falafel"
@@ -26,6 +27,11 @@ func main() {
 	}
 
 	protogen.Options{}.Run(func(gen *protogen.Plugin) error {
+		// Set support for optional fields in proto3
+		gen.SupportedFeatures = uint64(
+			pluginpb.CodeGeneratorResponse_FEATURE_PROTO3_OPTIONAL,
+		)
+
 		// Parse the parameters handed to the plugin.
 		param := parseParams(gen.Request.GetParameter())
 
