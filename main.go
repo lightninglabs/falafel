@@ -1,18 +1,13 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"text/template"
 
-	"strings"
-
-	"github.com/golang/protobuf/protoc-gen-go/generator"
-	plugin "github.com/golang/protobuf/protoc-gen-go/plugin"
-	"github.com/grpc-ecosystem/grpc-gateway/codegenerator"
-	"github.com/grpc-ecosystem/grpc-gateway/protoc-gen-grpc-gateway/descriptor"
+	"google.golang.org/protobuf/compiler/protogen"
 )
 
 const toolName = "falafel"
@@ -30,90 +25,111 @@ func main() {
 		return
 	}
 
-	// Read the plugin output from protoc.
-	req, err := codegenerator.ParseRequest(os.Stdin)
-	if err != nil {
-		log.Fatal(err)
-	}
+	protogen.Options{}.Run(func(gen *protogen.Plugin) error {
+		// Parse the parameters handed to the plugin.
+		param := parseParams(gen.Request.GetParameter())
 
-	// Load the parsed request into a descriptor registry.
-	reg := descriptor.NewRegistry()
-	if err := reg.Load(req); err != nil {
-		log.Fatal(err)
-	}
-
-	// Parse the parameters handed to the plugin.
-	parameter := req.GetParameter()
-	param := split(parameter, ",")
-
-	// Extract the RPC call godoc from the proto.
-	godoc := make(map[string]string)
-	for _, f := range req.GetProtoFile() {
-		fd := &generator.FileDescriptor{
-			FileDescriptorProto: f,
-		}
-		for _, loc := range fd.GetSourceCodeInfo().GetLocation() {
-			if loc.LeadingComments == nil {
+		// Iterate over each file passed to the plugin.
+		for _, f := range gen.Files {
+			if !f.Generate {
 				continue
 			}
-			c := *loc.LeadingComments
 
-			// Find the first newline. The actual comment will
-			// start following this.
-			i := 0
-			for j := range c {
-				if c[j] == '\n' {
-					i = j
-					break
-				}
+			// Extract the RPC call godoc from the proto file.
+			godoc := extractComments(f)
+
+			// Generate stubs either for mobile or for JS.
+			if param["js_stubs"] == "1" {
+				genJSStubs(gen, f, param)
+			} else {
+				genMobileStubs(gen, f, param, godoc)
 			}
-			c = c[i+1:]
 
-			// Find the first space. The method's name will
-			// be all characters up to that space.
-			i = 0
-			for j := range c {
-				if c[j] == ' ' {
-					i = j
-					break
-				}
+			// Finally, with the service definitions successfully
+			// created, create the in-memory grpc definitions if
+			// requested.
+			if param["mem_rpc"] == "1" {
+				genMemRPC(gen, f, param)
 			}
-			method := c[:i]
-
-			// Insert comment // instead of every newline.
-			c = strings.Replace(c, "\n", "\n// ", -1)
-
-			// Remove trailing spaces from comments.
-			c = strings.Replace(c, " \n//", "\n//", -1)
-
-			// Add a leading comment // and remove the traling
-			// one.
-			if len(c) < 4 {
-				continue
-			}
-			c = "// " + c[:len(c)-4]
-
-			godoc[method] = c
 		}
-	}
 
-	// Go through the requested proto files to generate, and inspect the
-	// services they define. We either generate for mobile or for JS.
-	if param["js_stubs"] == "1" {
-		genJSStubs(param, req, reg)
-	} else {
-		genMobileStubs(param, godoc, req, reg)
-	}
-
-	// Finally, with the service definitions successfully created, create
-	// the in memory grpc definitions if requested.
-	if param["mem_rpc"] == "1" {
-		genMemRPC(param)
-	}
+		return nil
+	})
 }
 
-func genMobileStubs(param, godoc map[string]string,
-	req *plugin.CodeGeneratorRequest, reg *descriptor.Registry) {
+// parseParams parses any parameters handed to the plugin.
+func parseParams(parameter string) map[string]string {
+	param := make(map[string]string)
+	if parameter == "" {
+		return param
+	}
+
+	for _, p := range strings.Split(parameter, ",") {
+		if i := strings.Index(p, "="); i < 0 {
+			param[p] = ""
+		} else {
+			param[p[0:i]] = p[i+1:]
+		}
+	}
+
+	return param
+}
+
+// extractComments extracts the RPC call godoc from the proto file.
+func extractComments(file *protogen.File) map[string]string {
+	locations := file.Desc.SourceLocations()
+
+	godoc := make(map[string]string)
+	for i := 0; i < locations.Len(); i++ {
+		loc := locations.Get(i)
+
+		if loc.LeadingComments == "" {
+			continue
+		}
+		c := loc.LeadingComments
+
+		// Find the first newline. The actual comment will start
+		// following this.
+		i := 0
+		for j := range c {
+			if c[j] == '\n' {
+				i = j
+				break
+			}
+		}
+		c = c[i+1:]
+
+		// Find the first space. The method's name will be all
+		// characters up to that space.
+		i = 0
+		for j := range c {
+			if c[j] == ' ' {
+				i = j
+				break
+			}
+		}
+		method := c[:i]
+
+		// Insert comment // instead of every newline.
+		c = strings.Replace(c, "\n", "\n// ", -1)
+
+		// Remove trailing spaces from comments.
+		c = strings.Replace(c, " \n//", "\n//", -1)
+
+		// Add a leading comment // and remove the trailing one.
+		if len(c) < 4 {
+			continue
+		}
+		c = "// " + c[:len(c)-4]
+
+		godoc[method] = c
+	}
+
+	return godoc
+}
+
+func genMobileStubs(gen *protogen.Plugin, file *protogen.File,
+	param map[string]string, godoc map[string]string) {
 
 	// We need package_name and target_package in order to continue.
 	pkg := param["package_name"]
@@ -148,117 +164,116 @@ func genMobileStubs(param, godoc map[string]string,
 		apiPrefix = true
 	}
 
-	for _, filename := range req.FileToGenerate {
-		target, err := reg.LookupFile(filename)
+	// For each service, we'll create a file with the generated API.
+	for _, service := range file.Services {
+		name := service.GoName
+		n := strings.ToLower(name)
+
+		listener := listeners[n]
+		if listener == "" {
+			if defaultLis == "" {
+				log.Fatal(fmt.Sprintf("no listener set for "+
+					"service %s", n))
+			}
+			listener = defaultLis
+		}
+
+		filename := "./" + n + "_api_generated.go"
+		g := gen.NewGeneratedFile(filename, file.GoImportPath)
+
+		// Create the file header.
+		params := headerParams{
+			ToolName:  versionString,
+			FileName:  filename,
+			Package:   pkg,
+			TargetPkg: targetPkg,
+			BuildTags: buildTags,
+		}
+		if err := headerTemplate.Execute(g, params); err != nil {
+			log.Fatal(err)
+		}
+
+		// Create service specific methods.
+		serviceParams := serviceParams{
+			ServiceName: name,
+			TargetName:  targetName,
+			Listener:    listener,
+		}
+		err := serviceTemplate.Execute(g, serviceParams)
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		// For each service, we'll create a file with the generated api.
-		for _, s := range target.Services {
-			name := s.GetName()
-			n := strings.ToLower(name)
+		// Go through each method defined by the service and call the
+		// appropriate template depending on the RPC type.
+		for _, method := range service.Methods {
+			methodName := method.GoName
 
-			listener := listeners[n]
-			if listener == "" {
-				if defaultLis == "" {
-					log.Fatal(fmt.Sprintf("no listener set for "+
-						"service %s", n))
-				}
-				listener = defaultLis
+			// Get the input type's package.
+			typeImportPath := string(
+				method.Input.GoIdent.GoImportPath,
+			)
+			path := strings.Split(typeImportPath, "/")
+			if len(path) == 0 {
+				log.Fatal("expected an import path for the " +
+					"input type but got none")
+				return
 			}
 
-			f, err := os.Create("./" + n + "_api_generated.go")
-			if err != nil {
-				log.Fatal(err)
+			// Get the package name of the input type.
+			inputPkg := path[len(path)-1]
+
+			inputType := method.Input.GoIdent.GoName
+
+			// If the input comes from an outside package, we need
+			// to prepend the outside package's name to the type.
+			if inputPkg != pkg {
+				inputType = fmt.Sprintf(
+					"%s.%s", inputPkg, inputType,
+				)
 			}
 
-			wr := bufio.NewWriter(f)
-
-			// Create the file header.
-			params := headerParams{
-				ToolName:  versionString,
-				FileName:  filename,
-				Package:   pkg,
-				TargetPkg: targetPkg,
-				BuildTags: buildTags,
+			rpcParams := rpcParams{
+				ServiceName: service.GoName,
+				MethodName:  methodName,
+				RequestType: inputType,
+				Comment:     godoc[methodName],
 			}
-			if err := headerTemplate.Execute(wr, params); err != nil {
-				log.Fatal(err)
+			if apiPrefix {
+				rpcParams.ApiPrefix = service.GoName
 			}
 
-			// Create service specific methods.
-			p := serviceParams{
-				ServiceName: name,
-				TargetName:  targetName,
-				Listener:    listener,
-			}
-			if err := serviceTemplate.Execute(wr, p); err != nil {
-				log.Fatal(err)
-			}
+			clientStream := method.Desc.IsStreamingClient()
+			serverStream := method.Desc.IsStreamingServer()
 
-			// Go through each method defined by the service, and
-			// call the appropriate template, depending on the RPC
-			// type.
-			for _, m := range s.Methods {
-				name := m.GetName()
-				p := rpcParams{
-					ServiceName: s.GetName(),
-					MethodName:  name,
-					// Type names are returned with an
-					// initial dot, e.g.
-					// .lnrpc.GetInfoRequest, we just strip
-					// that dot away.
-					RequestType: m.GetInputType()[1:],
-					Comment:     godoc[name],
-				}
-				if apiPrefix {
-					p.ApiPrefix = p.ServiceName
+			switch {
+			case !clientStream && !serverStream:
+				err := syncTemplate.Execute(g, rpcParams)
+				if err != nil {
+					log.Fatal(err)
 				}
 
-				clientStream := false
-				serverStream := false
-				if m.ClientStreaming != nil {
-					clientStream = *m.ClientStreaming
+			case !clientStream && serverStream:
+				err := readStreamTemplate.Execute(g, rpcParams)
+				if err != nil {
+					log.Fatal(err)
 				}
 
-				if m.ServerStreaming != nil {
-					serverStream = *m.ServerStreaming
+			case clientStream && serverStream:
+				err := biStreamTemplate.Execute(g, rpcParams)
+				if err != nil {
+					log.Fatal(err)
 				}
 
-				switch {
-				case !clientStream && !serverStream:
-					if err := syncTemplate.Execute(wr, p); err != nil {
-						log.Fatal(err)
-					}
-
-				case !clientStream && serverStream:
-					if err := readStreamTemplate.Execute(wr, p); err != nil {
-						log.Fatal(err)
-					}
-
-				case clientStream && serverStream:
-					if err := biStreamTemplate.Execute(wr, p); err != nil {
-						log.Fatal(err)
-					}
-
-				default:
-					log.Fatal("unexpected method type")
-				}
-			}
-
-			if err := wr.Flush(); err != nil {
-				log.Fatal(err)
-			}
-			if err := f.Close(); err != nil {
-				log.Fatal(err)
+			default:
+				log.Fatal("unexpected method type")
 			}
 		}
 	}
 }
 
-func genJSStubs(param map[string]string, req *plugin.CodeGeneratorRequest,
-	reg *descriptor.Registry) {
+func genJSStubs(gen *protogen.Plugin, file *protogen.File,
+	param map[string]string) {
 
 	// We need package_name and target_package in order to continue.
 	pkg := param["package_name"]
@@ -269,87 +284,84 @@ func genJSStubs(param map[string]string, req *plugin.CodeGeneratorRequest,
 	buildTag := param["build_tags"]
 	manualImport := param["manual_import"]
 
-	for _, filename := range req.FileToGenerate {
-		target, err := reg.LookupFile(filename)
-		if err != nil {
-			log.Fatal(err)
+	// For each service, we'll create a file with the generated API.
+	for _, service := range file.Services {
+		name := service.GoName
+		n := strings.ToLower(name)
+
+		filename := "./" + n + ".pb.json.go"
+		g := gen.NewGeneratedFile(filename, file.GoImportPath)
+
+		// Create the file header.
+		params := jsHeaderParams{
+			ToolName:     versionString,
+			FileName:     file.Proto.GetName(),
+			ServiceName:  name,
+			Package:      pkg,
+			ManualImport: manualImport,
+			BuildTag:     buildTag,
 		}
 
-		// For each service, we'll create a file with the generated api.
-		for _, s := range target.Services {
-			name := s.GetName()
-			n := strings.ToLower(name)
+		// Go through each method defined by the service and call the
+		// appropriate template.
+		for _, method := range service.Methods {
+			methodName := method.GoName
 
-			f, err := os.Create("./" + n + ".pb.json.go")
-			if err != nil {
-				log.Fatal(err)
+			// Get the input type's package.
+			path := strings.Split(
+				string(method.Input.GoIdent.GoImportPath), "/",
+			)
+			if len(path) == 0 {
+				log.Fatal("expected an import path for the " +
+					"input type but got none")
+				return
 			}
 
-			wr := bufio.NewWriter(f)
+			// Get the package name of the input type.
+			inputPkg := path[len(path)-1]
 
-			// Create the file header.
-			params := jsHeaderParams{
-				ToolName:     versionString,
-				FileName:     filename,
-				ServiceName:  name,
-				Package:      pkg,
-				ManualImport: manualImport,
-				BuildTag:     buildTag,
+			inputType := method.Input.GoIdent.GoName
+
+			// If the input comes from an outside package, we need
+			// to prepend the outside package's name to the type.
+			// This will likely be a "manual_import" that the user
+			// has specified.
+			// TODO: remove the need for manual import?
+			if inputPkg != pkg {
+				inputType = fmt.Sprintf(
+					"%s.%s", inputPkg, inputType,
+				)
 			}
 
-			// Go through each method defined by the service, and
-			// call the appropriate template, depending on the RPC
-			// type.
-			for _, m := range s.Methods {
-				name := m.GetName()
-
-				// Type names are returned with an initial dot,
-				// e.g. .lnrpc.GetInfoRequest, we just strip
-				// that dot away.
-				inputType := m.GetInputType()[1:]
-				if strings.Contains(inputType, pkg) {
-					inputType = strings.ReplaceAll(
-						inputType, pkg+".", "",
-					)
-				}
-
-				p := jsRpcParams{
-					MethodName:  name,
-					ServiceName: s.GetName(),
-					RequestType: inputType,
-				}
-
-				clientStream := false
-				if m.ClientStreaming != nil {
-					clientStream = *m.ClientStreaming
-				}
-
-				if m.ServerStreaming != nil {
-					p.ResponseStreaming = *m.ServerStreaming
-				}
-
-				if clientStream {
-					continue
-				}
-
-				params.Methods = append(params.Methods, p)
+			p := jsRpcParams{
+				MethodName:  methodName,
+				ServiceName: service.GoName,
+				RequestType: inputType,
 			}
 
-			if err := jsTemplate.Execute(wr, params); err != nil {
-				log.Fatal(err)
+			clientStream := method.Desc.IsStreamingClient()
+			serverStream := method.Desc.IsStreamingServer()
+
+			if serverStream {
+				p.ResponseStreaming = true
 			}
 
-			if err := wr.Flush(); err != nil {
-				log.Fatal(err)
+			if clientStream {
+				continue
 			}
-			if err := f.Close(); err != nil {
-				log.Fatal(err)
-			}
+
+			params.Methods = append(params.Methods, p)
+		}
+
+		if err := jsTemplate.Execute(g, params); err != nil {
+			log.Fatal(err)
 		}
 	}
 }
 
-func genMemRPC(param map[string]string) {
+func genMemRPC(gen *protogen.Plugin, file *protogen.File,
+	param map[string]string) {
+
 	// We need package_name and target_package in order to continue.
 	pkg := param["package_name"]
 	if pkg == "" {
@@ -372,50 +384,30 @@ func genMemRPC(param map[string]string) {
 		if _, ok := added[listener]; ok {
 			continue
 		}
-
 		usedListeners = append(usedListeners, listener)
 		added[listener] = struct{}{}
 	}
 
-	f, err := os.Create("./memrpc_generated.go")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	wr := bufio.NewWriter(f)
+	// Create memrpc_generated.go file
+	filename := "./memrpc_generated.go"
+	g := gen.NewGeneratedFile(filename, file.GoImportPath)
 	p := memRpcParams{
 		ToolName: versionString,
 		Package:  pkg,
 	}
-	if err := memRpcTemplate.Execute(wr, p); err != nil {
-		log.Fatal(err)
-	}
-	if err := wr.Flush(); err != nil {
-		log.Fatal(err)
-	}
-	if err := f.Close(); err != nil {
+	if err := memRpcTemplate.Execute(g, p); err != nil {
 		log.Fatal(err)
 	}
 
-	lisf, err := os.Create("./listeners_generated.go")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	liswr := bufio.NewWriter(lisf)
+	// Create listeners_generated.go file
+	lisFilename := "./listeners_generated.go"
+	lisG := gen.NewGeneratedFile(lisFilename, file.GoImportPath)
 	lisp := listenersParams{
 		ToolName:  versionString,
 		Package:   pkg,
 		Listeners: usedListeners,
 	}
-	err = listenersTemplate.Execute(liswr, lisp)
-	if err != nil {
-		log.Fatal(err)
-	}
-	if err := liswr.Flush(); err != nil {
-		log.Fatal(err)
-	}
-	if err := lisf.Close(); err != nil {
+	if err := listenersTemplate.Execute(lisG, lisp); err != nil {
 		log.Fatal(err)
 	}
 }
