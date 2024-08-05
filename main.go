@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"strings"
 	"text/template"
 
@@ -300,12 +301,16 @@ func genJSStubs(gen *protogen.Plugin, file *protogen.File,
 
 		// Create the file header.
 		params := jsHeaderParams{
-			ToolName:     versionString,
-			FileName:     file.Proto.GetName(),
-			ServiceName:  name,
-			Package:      pkg,
-			ManualImport: manualImport,
-			BuildTag:     buildTag,
+			ToolName:          versionString,
+			FileName:          file.Proto.GetName(),
+			ServiceName:       name,
+			Package:           pkg,
+			AdditionalImports: make(map[string]struct{}),
+			BuildTag:          buildTag,
+		}
+
+		if manualImport != "" {
+			params.AdditionalImports[manualImport] = struct{}{}
 		}
 
 		// Go through each method defined by the service and call the
@@ -314,9 +319,10 @@ func genJSStubs(gen *protogen.Plugin, file *protogen.File,
 			methodName := method.GoName
 
 			// Get the input type's package.
-			path := strings.Split(
-				string(method.Input.GoIdent.GoImportPath), "/",
+			typeImportPath := string(
+				method.Input.GoIdent.GoImportPath,
 			)
+			path := strings.Split(typeImportPath, "/")
 			if len(path) == 0 {
 				log.Fatal("expected an import path for the " +
 					"input type but got none")
@@ -330,10 +336,9 @@ func genJSStubs(gen *protogen.Plugin, file *protogen.File,
 
 			// If the input comes from an outside package, we need
 			// to prepend the outside package's name to the type.
-			// This will likely be a "manual_import" that the user
-			// has specified.
-			// TODO: remove the need for manual import?
 			if inputPkg != pkg {
+				params.AdditionalImports[typeImportPath] = struct{}{}
+
 				inputType = fmt.Sprintf(
 					"%s.%s", inputPkg, inputType,
 				)
@@ -361,6 +366,12 @@ func genJSStubs(gen *protogen.Plugin, file *protogen.File,
 
 		if err := jsTemplate.Execute(g, params); err != nil {
 			log.Fatal(err)
+		}
+
+		// Run goimports on the generated file.
+		cmd := exec.Command("goimports", "-w", filename)
+		if err := cmd.Run(); err != nil {
+			log.Fatal("failed to run goimports: %w", err)
 		}
 	}
 }

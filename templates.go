@@ -49,9 +49,8 @@ type jsHeaderParams struct {
 	// <Package>.<ServiceName>.<MethodName>
 	Package string
 
-	// ManualImport is a single optional golang import string that can be
-	// provided if an additional package needs to be imported.
-	ManualImport string
+	// AdditionalImports is a set of imports to be included.
+	AdditionalImports map[string]struct{}
 
 	// BuildTag an optional golang build tag that should be added to the
 	// header of the generated file.
@@ -66,7 +65,7 @@ type jsHeaderParams struct {
 type jsRpcParams struct {
 	// MethodName is the RPC method's name.
 	MethodName string
-	
+
 	// ServiceName is the original case gRPC service name as defined in the
 	// proto file.
 	ServiceName string
@@ -91,8 +90,9 @@ import (
 	"context"
 
 	gateway "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
-{{- if .ManualImport }}
-	"{{.ManualImport}}"{{- end}}
+{{- range $key, $value := .AdditionalImports }}
+	"{{ $key }}"
+{{- end }}
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
 )
