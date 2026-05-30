@@ -161,7 +161,7 @@ import (
 {{- end}}
 
 func Register{{.ServiceName | UpperCase}}JSONCallbacks(registry map[string]func(ctx context.Context,
-	conn *grpc.ClientConn, reqJSON string, callback func(string, error))) {
+	conn grpc.ClientConnInterface, reqJSON string, callback func(string, error))) {
 
 	marshaler := &gateway.JSONPb{
 		MarshalOptions: protojson.MarshalOptions{
@@ -173,7 +173,7 @@ func Register{{.ServiceName | UpperCase}}JSONCallbacks(registry map[string]func(
 {{- range $meth := .Methods}}
 
 	registry["{{$.Package}}.{{$.ServiceName}}.{{$meth.MethodName}}"] = func(ctx context.Context,
-		conn *grpc.ClientConn, reqJSON string, callback func(string, error)) {
+		conn grpc.ClientConnInterface, reqJSON string, callback func(string, error)) {
 {{- if $meth.ResponseStreaming }}
 {{template "streamRpcFunc" $meth}}
 {{- else }}

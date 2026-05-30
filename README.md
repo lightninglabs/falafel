@@ -169,7 +169,7 @@ import (
 )
 
 func RegisterStateJSONCallbacks(registry map[string]func(ctx context.Context,
-	conn *grpc.ClientConn, reqJSON string, callback func(string, error))) {
+	conn grpc.ClientConnInterface, reqJSON string, callback func(string, error))) {
 
 	marshaler := &gateway.JSONPb{
 	    MarshalOptions: protojson.MarshalOptions{
@@ -179,7 +179,7 @@ func RegisterStateJSONCallbacks(registry map[string]func(ctx context.Context,
 	}
 
 	registry["lnrpc.State.SubscribeState"] = func(ctx context.Context,
-		conn *grpc.ClientConn, reqJSON string, callback func(string, error)) {
+		conn grpc.ClientConnInterface, reqJSON string, callback func(string, error)) {
 
 		req := &lnrpc.SubscribeStateRequest{}
 		err := marshaler.Unmarshal([]byte(reqJSON), req)
@@ -221,7 +221,7 @@ func RegisterStateJSONCallbacks(registry map[string]func(ctx context.Context,
 	}
 
 	registry["lnrpc.State.GetState"] = func(ctx context.Context,
-		conn *grpc.ClientConn, reqJSON string, callback func(string, error)) {
+		conn grpc.ClientConnInterface, reqJSON string, callback func(string, error)) {
 
 		req := &lnrpc.GetStateRequest{}
 		err := marshaler.Unmarshal([]byte(reqJSON), req)
@@ -271,7 +271,7 @@ var (
 	lndConn *grpc.ClientConn
 
 	registry = make(map[string]func(ctx context.Context,
-		conn *grpc.ClientConn, reqJSON string,
+		conn grpc.ClientConnInterface, reqJSON string,
 		callback func(string, error)))
 )
 

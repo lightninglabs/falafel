@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"strings"
 	"text/template"
 
@@ -359,12 +358,6 @@ func genJSStubs(gen *protogen.Plugin, file *protogen.File,
 
 		if err := jsTemplate.Execute(g, params); err != nil {
 			log.Fatal(err)
-		}
-
-		// Run goimports on the generated file.
-		cmd := exec.Command("goimports", "-w", filename)
-		if err := cmd.Run(); err != nil {
-			log.Fatal("failed to run goimports: %w", err)
 		}
 	}
 }
